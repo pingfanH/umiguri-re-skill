@@ -272,7 +272,25 @@ const WA_TABLE = [252,113,113,161,156,129,155,251,255,156,249,43,162,156,245,100
 ```
 连接 CDP `/json/list` → page target → `Debugger.enable` → 收集 `scriptParsed` → `Debugger.getScriptSource` 落盘。
 
-### 5.3 源码保护(逆向项目自建,非游戏原生)
+### 5.3 `scripts/dump-larc.js`(`app.larc` 运行时提取)
+
+`.larc` 是 asar 变体(魔数 `Re=L`),解密在 `app.exe` 的 native `electron_common_asar` Archive 类里,**算法未逆向 → 没有离线解密脚本**。可行路径是**运行时提取**:
+
+```
+用法: node dump-larc.js [端口=9222] [输出目录=larc_out] [额外路径...]
+```
+
+**流程**:
+1. 游戏以 `--remote-debugging-port=9222` 启动(`app.larc` 经 `--app-path` 加载)。
+2. native asar Archive 透明解密 `.larc`,内容映射到 renderer 的 `file:///`。
+3. CDP `Runtime.evaluate` 在 renderer 里执行 `fetch('/main.js')` 等,返回**解密后的原文**。
+4. 结果 base64 传回 Node 落盘(二进制安全)。
+
+**限制**:只有经 `file://` 暴露给 renderer 的前端文件能拿(`index.html`/`main.css`/`main.js`);主进程 `index.js`/`package.json`/`node_modules` 拿不到。
+
+**要拿全**(含主进程)需逆向 native Archive 类:Ghidra 反汇编 `app.exe` 定位 `Archive::Init`/`ReadFile`(先用 `Re=L`/asar 常量交叉引用锚定),或 Frida hook 更底层(Electron asar 读取路径 / `uv_fs_read`),拿到密钥/流密码后按 asar 结构重写。这是唯一未攻克的硬骨头。
+
+### 5.4 源码保护(逆向项目自建,非游戏原生)
 
 项目里 `main.js` 用 **AES-256-CBC** 加密成 `main.js.enc`,运行时解密注入:
 - KEY = `umiguri-2025-inonote-16bytes-key`(32B)
@@ -363,6 +381,6 @@ const WA_TABLE = [252,113,113,161,156,129,155,251,255,156,249,43,162,156,245,100
 
 ## 9. 未完成 / 已知边界
 
-- `.larc` 解密算法(native `electron_common_asar` Archive 类,未逆向)。
+- `.larc` 解密算法(native `electron_common_asar` Archive 类,未逆向)。运行时提取见 §5.3 `dump-larc.js`(仅前端文件)。
 - 前端场景 UI 异步完成链卡点(`m_Hr.ef` 等,headless/壳环境限制)。
 - `game_logic.deobf.js` 是**分析产物**;游戏实际运行的是原始 `main.js`(AES 加密的 `main.js.enc`),两者语义一致,但反混淆的遍历函数(`m_De` 的 `&&` vs `if` 返回值)可能有细微差异——分析时注意。

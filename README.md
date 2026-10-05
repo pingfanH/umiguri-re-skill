@@ -13,7 +13,8 @@ umiguri-re-skill/
     ├── SKILL.md                 # 主文档(全流程)
     └── scripts/
         ├── decrypt_arc.js       # .arc/.una 归档批量解密器
-        └── dump-cdp.js          # CDP dump renderer 源码
+        ├── dump-cdp.js          # CDP dump renderer 源码
+        └── dump-larc.js         # app.larc(.larc) 运行时提取(解密后的前端文件)
 ```
 
 ## SKILL.md 覆盖
@@ -65,6 +66,17 @@ node umiguri-reverse-engineering/scripts/decrypt_arc.js --batch <根目录> [输
 # 游戏以 --remote-debugging-port=9222 启动后
 node umiguri-reverse-engineering/scripts/dump-cdp.js 9222 cdp_sources
 ```
+
+### 提取 app.larc(.larc)内容
+
+`.larc` 解密算法未逆向(native asar),用运行时提取:游戏以 `--remote-debugging-port=9222` 启动后,从 renderer `fetch` 解密后的原文。
+
+```bash
+node umiguri-reverse-engineering/scripts/dump-larc.js 9222 larc_out
+# 也可追加额外路径: node .../dump-larc.js 9222 larc_out /some/path.js
+```
+
+> 只能拿经 `file://` 暴露的前端文件(index.html/main.css/main.js);主进程 JS/node_modules 拿不到。
 
 ## 声明
 
