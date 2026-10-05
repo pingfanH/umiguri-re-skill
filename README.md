@@ -27,6 +27,7 @@ umiguri-re-skill/
 | 加解密算法 | 条目表偏移、PRNG 4 状态 rotr、XOR 表(VA/WA)、mNa 位置流、gzip、P2 参数 |
 | 解密后结构 | 扩展名推断、目录结构、明文数据 |
 | 运行时桥 | umgr_elc API、handshake、虚拟路径映射、DIK 键码 |
+| 复刻:Electron 壳 | 目录结构 / 主进程 `protocol.handle('file')` 拦截 / IPC / preload / 运行 / 打包 / 与 Tauri 差异 |
 | 踩坑 | FileEntry camelCase、URL 编码、query、双斜杠、Image.src、rotr 方向 |
 
 ## 使用

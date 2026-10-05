@@ -379,7 +379,105 @@ const WA_TABLE = [252,113,113,161,156,129,155,251,255,156,249,43,162,156,245,100
 
 ---
 
-## 9. 未完成 / 已知边界
+## 9. 复刻:Electron 壳(完整可运行)
+
+把恢复出来的前端 + 原始数据,用**官方 Electron** 重新装载,复刻原生运行环境。
+
+### 9.1 思路
+
+- 前端 3 个文件(`index.html`/`main.css`/`main.js`)从 `app.larc` 恢复(§5.3)。
+- 原生主进程那套(`umgr_elc`/键盘/串口)**拿不到**,需**自己实现**。
+- 数据目录直接用原始 `UMIGURI_NEXT`(加密 `.arc`/`.una` 由前端自带算法解密)。
+
+### 9.2 目录结构(`desktop/`)
+
+```
+desktop/
+├── package.json     # main → app-main.js;build.extraResources 打包数据
+├── app-main.js      # 主进程: 窗口 + IPC 文件系统 + file:// 协议拦截 + main.js AES 解密
+├── preload.js       # contextBridge 注入 umgr_elc + 键盘 + 串口 mock
+├── index.html       # 前端入口(<script src="main.js">)
+├── main.js          # 前端逻辑(明文;或替换为 main.js.enc 密文)
+└── main.css
+```
+
+### 9.3 `app-main.js` 要点
+
+1. `ROOT` = 数据根目录:打包后 `process.resourcesPath/game_data`,开发用 `UMIGURI_DATA_DIR` 或默认路径。
+2. `PATH_MAP` 虚拟路径映射(同 §6.3);`virtualToReal(vpath)`:先匹配 PATH_MAP,再判盘符/绝对路径,否则拼 ROOT。
+3. **IPC handler**:`handshake` / `fs:list` / `fs:file` / `fs:size` / `fs:read`。
+   - `fs:list` 必须返回 **camelCase** FileEntry:`{ fullPath, isDirectory, isFile, name }`(见 §7.1)。
+   - `fs:file` 返回 `{ status, data: Buffer }`;`fs:read` 返回 `{ status, data: { buf, br } }`。
+4. **`protocol.handle('file', ...)`** —— 复刻关键:拦截 `file://` 请求
+   - 去盘符前缀:`vpath.match(/^\/[a-zA-Z]:(.*)$/)` → `drive='D:'`, `vpath='/xxx'`。
+   - 虚拟路径(`/nameplates/` 等)走 `virtualToReal`;否则 `drive + vpath`。
+   - `/main.js` 特殊:返回 **AES 解密后的明文**(源码保护,见 §5.4)。
+   - 按扩展名给 MIME(`.html/.css/.js/.png/.dds/.wav/.mp3/.wasm/.xml` …)。
+5. 窗口:
+
+```js
+const win = new BrowserWindow({
+  width: 1280, height: 720, useContentSize: true,
+  webPreferences: { preload: path.join(__dirname, 'preload.js'),
+    contextIsolation: true, nodeIntegration: false },
+});
+win.loadFile('index.html');
+```
+
+### 9.4 `preload.js` 要点
+
+- `contextBridge.exposeInMainWorld('umgr_elc', { enable, _, st, si, g4 })`,`st.zu/sn/_2/xl` → `ipcRenderer.invoke('fs:*')`,其余返回 `{status:-1}` 占位。
+- **键盘**:`codeToVk(e.code → VK)` + `keydown/keyup` 维护 `keyState`;`kbdHeld(vk)`、`kbdUni2Virt(charCode)`(含符号键 `CHAR_TO_VK`)。
+- **Di8**:`di8KbdHeld(dik)` 用 **DIK→VK** 映射(方向键 `200/203/205/208`,见 §6.4/§7);`di8KbdStart/Update/Shutdown` 返回 0 让前端走键盘分支。
+- **串口 mock**:`ugSerialCreate/Open/Write/Pop/Close/Destroy` 全返回失败/空。
+- `getCurrentProcessId` / `kbdStart` / `kbdUpdate`。
+
+### 9.5 运行
+
+```bash
+# 用官方 Electron(不是游戏的 app.exe);Electron 二进制见项目 electron41/
+electron41/electron.exe desktop/
+# 或: cd desktop && npm install && npm start   (start = electron .)
+```
+
+### 9.6 打包(electron-builder)
+
+```jsonc
+// package.json
+"build": {
+  "appId": "jp.inonote.umiguri", "productName": "UMIGURI",
+  "extraResources": [
+    { "from": "../../data", "to": "game_data/data" },
+    { "from": "../../core", "to": "game_data/core" }   // 打包后 app-main.js 从 process.resourcesPath/game_data 读
+  ],
+  "win": { "target": "nsis" }, "mac": { "target": "dmg" }, "linux": { "target": ["AppImage","deb"] }
+}
+```
+
+```
+npm run dist:win / dist:mac / dist:linux
+```
+跨平台限制:**mac(dmg)只能在 macOS 打包**(签名限制),win/linux 可在 Windows 交叉。
+
+### 9.7 与 Tauri 壳的关键差异(踩坑对照)
+
+| 点 | Electron 壳 | Tauri 壳 |
+|----|------------|----------|
+| FileEntry 字段 | `app-main.js` 直接返回 camelCase,不踩坑 | Rust serde 默认 snake_case,必须 `#[serde(rename_all="camelCase")]` |
+| 封面 `Image.src` 相对路径 | `protocol.handle('file')` 自动兜底 | 需转自定义协议 / monkey-patch `Image` |
+| 二进制传输 | IPC 结构化克隆(Buffer),天然快 | `invoke` 返 `Vec<u8>` 走 JSON 极慢,需自定义 protocol |
+| 路径编码 | `decodeURIComponent` | 前端 `encodeURI` + Rust `percent_decode` |
+
+### 9.8 诚实边界:「完美运行」其实没达到
+
+- **做到了**:启动 → 数据加载完整(音乐/课程/角色/技能/称号/语言/铭牌/语音)→ THREE canvas 1920x1080 → `.una` 前端解密。
+- **没做到**:数据加载后**场景 UI 不显示**(卡 `m_Hr.ef` 完成链,`div=3`),未进主界面。
+- 主进程原生(`app.larc/index.js`)未恢复;`.larc` 未离线解密。
+- 准确说法:**「跑通到数据加载+渲染」**,不是「完美运行」。
+
+---
+
+## 10. 未完成 / 已知边界
 
 - `.larc` 解密算法(native `electron_common_asar` Archive 类,未逆向)。运行时提取见 §5.3 `dump-larc.js`(仅前端文件)。
 - 前端场景 UI 异步完成链卡点(`m_Hr.ef` 等,headless/壳环境限制)。
